@@ -2,6 +2,13 @@ import tensorflow as tf
 import optuna 
 import numpy as np
 
+def save_model_fun(save_model, model , error, best_error, best_model_path):
+    if round(error,0) < best_error:
+        if save_model:
+            model.save(best_model_path)
+        best_error = error
+    
+    return best_error
 
 
 def objective_conv(
@@ -83,10 +90,7 @@ def objective_conv(
     
     error = model.evaluate(wide_window.test)[1]  
     
-    if round(error,0) < best_error:
-        if save_model:
-            model.save(best_model_path)
-        best_error = error
+    best_error = save_model_fun(save_model, model, error, best_error, best_model_path)
 
     del model
     return error
@@ -153,10 +157,7 @@ def objective_linear(
     
     error = model.evaluate(wide_window.test)[1]  
     
-    if round(error,0) < best_error:
-        if save_model:
-            model.save(best_model_path)
-        best_error = error
+    best_error = save_model_fun(save_model, model, error, best_error, best_model_path)
 
     del model
     return error

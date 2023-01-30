@@ -187,3 +187,73 @@ class WindowGenerator():
             # And cache it for next time
             self._example = result
         return result
+    
+    def expected_return(
+        self,model, train_mean , train_std , plot_col='stock_logdif'):
+
+        data_ = self.total_data[-self.input_width:]
+        data_ = (data_  - train_mean) / train_std
+        data_ = data_.values
+        data_ = data_.reshape((1,data_.shape[0],data_.shape[1]))
+        plot_col_index = self.column_indices[plot_col]
+        
+        if self.label_columns:
+            label_col_index = self.label_columns_indices.get(plot_col, None)
+        else:
+            label_col_index = plot_col_index
+
+        predictions = model(data_)
+        return predictions
+
+    def get_futur_prices(
+        self,
+        predictions,
+        steps_futur, 
+        stock_code,
+        OUT_STEPS,
+        train_std,
+        train_mean,
+        lag_days,
+        n_days,
+        plot_col = 'stock_logdif'
+        ):
+    
+        index = self.label_columns_indices.get(plot_col, None)
+
+        prep_predictions = {
+            'Date': [ self.raw_stock['Date'].max() + relativedelta(days = i+1) for i in  range(OUT_STEPS)],
+            'stock_price': [0]*steps_futur,
+            'stock_stv': [0]*steps_futur,
+            'stock_logdif': list(predictions[0,:,index].numpy()) 
+        }
+        prep_predictions = pd.DataFrame(prep_predictions)
+        prep_predictions['stock_logdif'] = prep_predictions['stock_logdif'] * train_std[plot_col] + train_mean[plot_col]
+        
+        past_prices = self.raw_stock[-lag_days:]['stock_price'].values
+        exp_returns = prep_predictions['stock_logdif'].values
+        
+        expt_price = list()
+
+        for i in range(steps_futur):
+            if i < len(past_prices):
+                pred = np.exp(np.log(past_prices[i]) + exp_returns[i])
+                expt_price.append(pred)
+            else:
+                j = i - len(past_prices)
+                pred = np.exp(np.log(expt_price[j]) + exp_returns[i])
+                expt_price.append(pred)
+                
+        prep_predictions['stock_price'] = expt_price
+        prep_predictions['Type'] = 'Forecast'
+        prep_predictions['StockCode'] = stock_code
+        
+        some_history = self.raw_stock[-(lag_days+n_days):].copy()
+        some_history['Type'] = 'History'
+        some_history['StockCode'] = stock_code
+        
+        final_ = pd.concat([some_history, prep_predictions]).reset_index(drop = True)
+        final_ = final_[['Date','stock_price','Type','StockCode']]
+        final_['ExecutionDate'] = pd.Timestamp.today().strftime('%Y-%m-%d')
+        final_ = final_[-(steps_futur+4):]
+        
+        return final_

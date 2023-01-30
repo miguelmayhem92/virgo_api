@@ -4,6 +4,7 @@ import tensorflow as tf
 import numpy as np
 import optuna
 import schemas
+import os
 
 today_str = datetime.date.today().strftime("%Y-%m-%d")
 
@@ -19,8 +20,11 @@ input_length = configs.data_configs.input_length
 best_error = configs.data_configs.best_error
 save_predictions_path = configs.data_configs.save_predictions_path
 save_model_path = configs.data_configs.save_model_path
+cross_validation_trials = configs.optimazation_configs.cross_validation_trials
 
 today_str = datetime.date.today().strftime("%Y-%m-%d")
+
+
 
 '''
 model_and_study_path = f'{save_model_path}/{stock_code_name}/{today_str}'
@@ -33,7 +37,19 @@ study_name = f"{model_and_study_path}/model_study3"  # unique identifier of the 
 storage_name = "sqlite:///{}.db".format(study_name)
 predictions_path_file = f'{save_predictions_path}/{today_str}-{stock_code_name}-predictions.csv'
 '''
-def run_model(code, train_predict = False, cross_validation = False):
+def run_model(code, train_predict = False, cross_validation = False, save_model = False):
+    
+    ### some configs to save the model and study
+    model_and_study_path = f'{save_model_path}/{today_str}/{code}'
+
+    if not os.path.exists(model_and_study_path):
+        os.makedirs(model_and_study_path)
+
+    path_best_model = f'{model_and_study_path}/best_model.h5'
+    study_name = f"{model_and_study_path}/model_study3"  # unique identifier of the study.
+    storage_name = "sqlite:///{}.db".format(study_name)
+
+    predictions_path_file = f'{save_predictions_path}/{today_str}-{code}-predictions.csv'
     
     ### getting the data
     raw_stock = datafuncion.get_stock_data(stock_code = code, n_days = n_days, window = window, lags = lag_days)
@@ -114,24 +130,58 @@ def run_model(code, train_predict = False, cross_validation = False):
 
         best_model_framework =list(multi_performance.keys())[np.argmin(test_mae)]
 
+        ###storing first training results ### to save in memory
+        best_model_framework =list(multi_performance.keys())[np.argmin(test_mae)]
+        baseline_validation_results = dict(zip(multi_performance.keys(), val_mae))
+        baseline_test_results = dict(zip(multi_performance.keys(), test_mae))
+
     if train_predict and cross_validation:
         
         study = optuna.create_study(
             direction='minimize',
-            #study_name=study_name,
-            #storage=storage_name,
-            study_name = None,
+            study_name=study_name,
+            storage=storage_name,
+            #study_name = None,
             load_if_exists=True,
             )
         objective = crossvalidation.objective_functions.ojective_functions[best_model_framework]
-        func = lambda trial: objective(trial, OUT_STEPS, num_features, wide_window, best_error)
-        study.optimize(func, n_trials=50)
-        best_error_study = study.best_value
+        func = lambda trial: objective(
+            trial, OUT_STEPS, num_features, 
+            wide_window, best_error, save_model, path_best_model)
+        study.optimize(func, n_trials=cross_validation_trials)
+
+        best_params_study = study.best_params  #### to save in memory
+        best_error_study = study.best_value  #### to save in memory
+
+        best_model = tf.keras.models.load_model(path_best_model)
+
+        predictions = wide_window.expected_return(
+            plot_col='stock_logdif',
+            model = best_model,
+            train_mean = train_mean, 
+            train_std = train_std,
+             )
+
+        final_result = wide_window.get_futur_prices(
+            predictions= predictions,
+            steps_futur = OUT_STEPS, 
+            stock_code= code,
+            OUT_STEPS= OUT_STEPS,
+            train_std= train_std,
+            train_mean = train_mean,
+            lag_days=lag_days,
+            n_days=n_days,
+            )
+        
+        final_result.to_csv(predictions_path_file)
 
     ######
     tf_version = tf.__version__
     len_data = len(raw_stock)
     best_model_framework
+    final_result_len = len(final_result)
+    predicted_prices = list(final_result[final_result['Type'] == 'Forecast'].stock_price)
+
     message_window = '\n'.join([
         f'the package is tensorflow{tf_version} and the code to search is {len_data}',
             f'Total window size: {wide_window.total_window_size}',
@@ -140,6 +190,8 @@ def run_model(code, train_predict = False, cross_validation = False):
             f'Label column name(s): {wide_window.label_columns}',
             f'best model {best_model_framework}',
             f'best error from study {best_error_study}',
+            f'len final result {final_result_len}'
+            f'vector of forecastood stock prices {predicted_prices}'
             ])
 
     return (message_window)
