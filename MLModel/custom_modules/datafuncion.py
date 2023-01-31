@@ -92,12 +92,12 @@ class split_data():
         self.num_features = data.shape[1]
 
     def scaling(self):
-        self.train_mean = self.test_df.mean()
-        self.train_std = self.test_df.std()
+        self.train_mean = self.train_df.mean()
+        self.train_std = self.train_df.std()
 
         self.train_df = (self.train_df - self.train_mean) / self.train_std
         self.val_df = (self.val_df - self.train_mean) / self.train_std
-        self.train_df = (self.test_df - self.train_mean) / self.train_std
+        self.test_df = (self.test_df - self.train_mean) / self.train_std
 
 ### object for training
 class WindowGenerator():
@@ -203,7 +203,7 @@ class WindowGenerator():
             label_col_index = plot_col_index
 
         predictions = model(data_)
-        return predictions
+        return predictions, data_
 
     def get_futur_prices(
         self,
@@ -214,7 +214,7 @@ class WindowGenerator():
         train_std,
         train_mean,
         lag_days,
-        n_days,
+        n_days = 14,
         plot_col = 'stock_logdif'
         ):
     
@@ -256,4 +256,4 @@ class WindowGenerator():
         final_['ExecutionDate'] = pd.Timestamp.today().strftime('%Y-%m-%d')
         final_ = final_[-(steps_futur+4):]
         
-        return final_
+        return final_, some_history, prep_predictions
