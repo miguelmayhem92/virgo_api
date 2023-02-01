@@ -87,15 +87,25 @@ class run_supermodel():
             shift=OUT_STEPS,
             label_columns=['stock_logdif']
         )
+
+        tf_version = tf.__version__
+        len_data = len(raw_stock)
+
+        message_result = ' '.join([
+            f'the package is tensorflow{tf_version} and the code to search is {self.stock_code}'
+            f'with data length {len_data}'
+        ])  
         ############################################################
         ###### Train baseline Models  ###############
         ############################################################
-        multi_val_performance = {}
-        self.multi_performance = {}
-        best_model_framework = None
-        best_error_study = None
+
 
         if self.train_predict_bool:
+
+            multi_val_performance = {}
+            self.multi_performance = {}
+            best_model_framework = None
+            best_error_study = None
 
             multi_linear_model = modeling.initial_models(OUT_STEPS, num_features).multi_linear_model
             history = modeling.compile_and_fit(multi_linear_model, wide_window)
@@ -135,6 +145,11 @@ class run_supermodel():
             best_model_framework =list(self.multi_performance.keys())[np.argmin(self.test_mae)]
             baseline_validation_results = dict(zip(self.multi_performance.keys(), self.val_mae))
             baseline_test_results = dict(zip(self.multi_performance.keys(), self.test_mae))
+
+            message_result = ' '.join([ 
+                message_result,
+                f', the best base-line model is: {best_model_framework}'
+            ])
 
         if self.train_predict_bool and self.cross_validation:
     
@@ -184,23 +199,13 @@ class run_supermodel():
             final_result.to_csv(self.predictions_path_file)
             self.wide_window = wide_window
 
-        tf_version = tf.__version__
-        len_data = len(raw_stock)
-        best_model_framework
-        final_result_len = len(final_result)
-        predicted_prices = list(final_result[final_result['Type'] == 'Forecast'].stock_price)
-        xc = len(self.some_history)
-        message_window = '\n'.join([
-            f'the package is tensorflow{tf_version} and the code to search is {len_data}',
-            f'the test baseline error is {self.test_mae}'
-                f'best model {best_model_framework}',
-                f'best error from study {best_error_study}',
-                f'len final result {final_result_len}'
-                f'vector of forecastood stock prices {predicted_prices}'
-                f' gato {xc}'
-                ])
+            message_result = ' '.join([
+                message_result,
+                'crossvalidation done'
 
-        return (message_window)
+            ])
+
+        return (message_result)
 
     def baseline_models_plot(self):
             x = np.arange(len(self.multi_performance))
@@ -275,161 +280,3 @@ class run_supermodel():
         plt.savefig(img_buf, format='png')
         plt.close()
         return img_buf
-
-"""
-def run_model(code, train_predict = False, cross_validation = False, save_model = False):
-    
-    ### some configs to save the model and study
-    model_and_study_path = f'{save_model_path}/{today_str}/{code}'
-
-    if not os.path.exists(model_and_study_path):
-        os.makedirs(model_and_study_path)
-
-    path_best_model = f'{model_and_study_path}/best_model.h5'
-    study_name = f"{model_and_study_path}/model_study3"  # unique identifier of the study.
-    storage_name = "sqlite:///{}.db".format(study_name)
-
-    predictions_path_file = f'{save_predictions_path}/{today_str}-{code}-predictions.csv'
-    
-    ### getting the data
-    raw_stock = datafuncion.get_stock_data(stock_code = code, n_days = n_days, window = window, lags = lag_days)
-    raw_stock = datafuncion.shape_data(raw_stock , 'stock', ref_price, std_column, logdif_column)
-
-    ### feature engineering
-    stock_data = datafuncion.data_eng_features(data = raw_stock)
-    
-    ### spliting data
-    split_object = datafuncion.split_data(stock_data, split_config)
-
-    column_indices = split_object.column_indices
-    n = split_object.ndata
-    train_df = split_object.train_df
-    val_df  = split_object.val_df
-    test_df = split_object.test_df
-    num_features = split_object.num_features
-    ### scaling
-    split_object.scaling()
-    train_mean = split_object.train_mean
-    train_std = split_object.train_std
-    ### train, val and test are already updated, we just need mean and std for later rescaling
-
-    ### the objecto for window generation and tf dataset
-    wide_window = datafuncion.WindowGenerator(
-        total_data = stock_data, 
-        raw_stock = raw_stock,
-        train_df=train_df, 
-        val_df=val_df, 
-        test_df=test_df,
-        input_width=input_length, 
-        label_width=OUT_STEPS, 
-        shift=OUT_STEPS,
-        label_columns=['stock_logdif']
-        )
-
-    ############################################################
-    ###### Train baseline Models  ###############
-    ############################################################
-    multi_val_performance = {}
-    multi_performance = {}
-    best_model_framework = None
-    best_error_study = None
-
-    if train_predict:
-
-        multi_linear_model = modeling.initial_models(OUT_STEPS, num_features).multi_linear_model
-        history = modeling.compile_and_fit(multi_linear_model, wide_window)
-        multi_val_performance['Linear'] = multi_linear_model.evaluate(wide_window.val)
-        multi_performance['Linear'] = multi_linear_model.evaluate(wide_window.test, verbose=0)
-
-        multi_dense_model = modeling.initial_models(OUT_STEPS, num_features).multi_linear_model
-        history = modeling.compile_and_fit(multi_dense_model, wide_window)
-        multi_val_performance['Dense'] = multi_dense_model.evaluate(wide_window.val)
-        multi_performance['Dense'] = multi_dense_model.evaluate(wide_window.test, verbose=0)
-
-        multi_conv_model = modeling.initial_models(OUT_STEPS, num_features).multi_conv_model
-        history = modeling.compile_and_fit(multi_conv_model, wide_window)
-        multi_val_performance['Conv'] = multi_conv_model.evaluate(wide_window.val)
-        multi_performance['Conv'] = multi_conv_model.evaluate(wide_window.test, verbose=0)
-
-        multi_lstm_model = modeling.initial_models(OUT_STEPS, num_features).multi_lstm_model
-        history = modeling.compile_and_fit(multi_lstm_model, wide_window)
-        multi_val_performance['LSTM'] = multi_lstm_model.evaluate(wide_window.val)
-        multi_performance['LSTM'] = multi_lstm_model.evaluate(wide_window.test, verbose=0)
-
-        feedback_model = modeling.initial_models(OUT_STEPS, num_features).feedback_model
-        history = modeling.compile_and_fit(feedback_model, wide_window)
-        multi_val_performance['AR LSTM'] = feedback_model.evaluate(wide_window.val)
-        multi_performance['AR LSTM'] = feedback_model.evaluate(wide_window.test, verbose=0)
-
-        ### base line models error
-        
-        metric_name = 'mean_absolute_error'
-        metric_index = multi_linear_model.metrics_names.index('mean_absolute_error')
-        val_mae = [v[metric_index] for v in multi_val_performance.values()]
-        test_mae = [v[metric_index] for v in multi_performance.values()]
-
-        ###storing first training results ### to save in memory
-        best_model_framework =list(multi_performance.keys())[np.argmin(test_mae)]
-        baseline_validation_results = dict(zip(multi_performance.keys(), val_mae))
-        baseline_test_results = dict(zip(multi_performance.keys(), test_mae))
-
-    if train_predict and cross_validation:
-        
-        study = optuna.create_study(
-            direction='minimize',
-            study_name=study_name,
-            storage=storage_name,
-            #study_name = None,
-            load_if_exists=True,
-            )
-        objective = crossvalidation.objective_functions.ojective_functions[best_model_framework]
-        func = lambda trial: objective(
-            trial, OUT_STEPS, num_features, 
-            wide_window, best_error, save_model, path_best_model)
-        study.optimize(func, n_trials=cross_validation_trials)
-
-        best_params_study = study.best_params  #### to save in memory
-        best_error_study = study.best_value  #### to save in memory
-
-        best_model = tf.keras.models.load_model(path_best_model)
-
-        predictions = wide_window.expected_return(
-            plot_col='stock_logdif',
-            model = best_model,
-            train_mean = train_mean, 
-            train_std = train_std,
-             )
-
-        final_result = wide_window.get_futur_prices(
-            predictions= predictions,
-            steps_futur = OUT_STEPS, 
-            stock_code= code,
-            OUT_STEPS= OUT_STEPS,
-            train_std= train_std,
-            train_mean = train_mean,
-            lag_days=lag_days,
-            n_days=n_days,
-            )
-        
-        final_result.to_csv(predictions_path_file)
-
-    ######
-    tf_version = tf.__version__
-    len_data = len(raw_stock)
-    best_model_framework
-    final_result_len = len(final_result)
-    predicted_prices = list(final_result[final_result['Type'] == 'Forecast'].stock_price)
-
-    message_window = '\n'.join([
-        f'the package is tensorflow{tf_version} and the code to search is {len_data}',
-            f'Total window size: {wide_window.total_window_size}',
-            f'Input indices: {wide_window.input_indices}',
-            f'Label indices: {wide_window.label_indices}',
-            f'Label column name(s): {wide_window.label_columns}',
-            f'best model {best_model_framework}',
-            f'best error from study {best_error_study}',
-            f'len final result {final_result_len}'
-            f'vector of forecastood stock prices {predicted_prices}'
-            ])
-
-    return (message_window)"""
