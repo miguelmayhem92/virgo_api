@@ -257,3 +257,15 @@ class WindowGenerator():
         final_ = final_[-(steps_futur+4):]
         
         return final_, some_history, prep_predictions
+    
+    def get_metrics(self, model, source):
+
+        if source == 'test':
+            sample = self.test
+        if source == 'validation':
+            sample = self.val
+
+        error = model.evaluate(self.sample)[1]     
+        return error
+    
+    

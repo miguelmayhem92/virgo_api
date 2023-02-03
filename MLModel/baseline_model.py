@@ -3,8 +3,12 @@ import datetime
 import tensorflow as tf
 import numpy as np
 import optuna
-import schemas
 import os
+
+import mlflow
+from pathlib import Path
+from  mlflow.tracking import MlflowClient
+from mlflow.models.signature import infer_signature
 
 import io
 import matplotlib
@@ -31,9 +35,10 @@ today_str = datetime.date.today().strftime("%Y-%m-%d")
 
 class run_supermodel():
     
-    def __init__(self, stock_code, train_predict_bool = False, cross_validation = False, save_model = False):
+    def __init__(self, stock_code, train_predict_bool = False, cross_validation = False, n_trials = 1, save_model = False):
         self.stock_code = stock_code
         self.train_predict_bool = train_predict_bool
+        self.n_trials = n_trials
         self.cross_validation = cross_validation
         self.save_model = save_model
 
@@ -157,14 +162,13 @@ class run_supermodel():
                 direction='minimize',
                 study_name=self.study_name,
                 storage=self.storage_name,
-                #study_name = None,
                 load_if_exists=True,
                 )
             objective = crossvalidation.objective_functions.ojective_functions[best_model_framework]
             func = lambda trial: objective(
                 trial, OUT_STEPS, num_features, 
                 wide_window, best_error, self.save_model, self.path_best_model)
-            study.optimize(func, n_trials=cross_validation_trials)
+            study.optimize(func, n_trials= self.n_trials)
 
             best_params_study = study.best_params  #### to save in memory
             best_error_study = study.best_value  #### to save in memory
@@ -203,6 +207,77 @@ class run_supermodel():
                 message_result,
                 'crossvalidation done'
 
+            ])
+
+        if self.save_model:
+
+            ### creation of experiment or skip if it exists
+            try:
+                experiment_id = mlflow.create_experiment(
+                    f'{self.stock_code}_experiments',
+                    artifact_location=Path.cwd().joinpath("mlruns").as_uri(),
+                )
+            except:
+                print('experiment exists')
+
+            ### getting the exp Id of the experiment folder
+            client = MlflowClient()
+            experiments = client.search_experiments()
+
+            for exp in experiments:
+                exp = dict(exp)
+                if exp['name'] == f'{self.stock_code}_experiments':
+                    exp_id = exp['experiment_id']
+                    break
+            ### metrics to store
+            mae_val = wide_window.get_metrics(self, self.model, source = 'validation')
+            mae_test = wide_window.get_metrics(self, self.model, source = 'test')
+
+            data_ = wide_window.total_data[-wide_window.input_width:]
+            data_ = (data_  - train_mean) / train_std
+            data_ = data_.values
+            data_ = data_.reshape((1,data_.shape[0],data_.shape[1]))
+            signature = infer_signature(data_, best_model.predict(data_))
+
+            with mlflow.start_run(
+                run_name = f'{self.stock_code}-run-{today_str}',
+                 experiment_id  = exp_id
+                 ):
+
+                mlflow.log_param("mae", mae_val)
+                mlflow.log_param("mae", mae_test)
+                mlflow.tensorflow.log_model(
+                    best_model, 
+                    artifact_path=f"{self.stock_code}-run",
+                    signature = signature
+                )
+            mlflow.end_run()
+            
+            ### Model Register
+            try:
+                client = MlflowClient()
+                client.create_registered_model(self.stock_code)
+            except:
+                print('folder already exists')
+            
+            mlflow.tensorflow.log_model(best_model,
+                artifact_path=f"{self.stock_code}",
+                registered_model_name=f'{self.stock_code}_model',
+                signature=signature)
+
+            ### staging the current model under the latest version
+            versions = list()
+            for mv in client.search_model_versions(f'{self.stock_code}_model'):
+                versions.append(dict(mv)['version'])
+
+            client.transition_model_version_stage(
+                name=f'{self.stock_code}_model',
+                version=max(versions),
+                stage="Production")
+            
+            message_result = ' '.join([
+                message_result,
+                'best model results, metrics and model saved in mlflow '
             ])
 
         return (message_result)

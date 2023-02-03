@@ -21,4 +21,3 @@ class data_configs:
 
 class optimazation_configs:
     days_back_predictions = 7
-    cross_validation_trials = 50 ### normal 50
