@@ -202,7 +202,7 @@ class WindowGenerator():
         else:
             label_col_index = plot_col_index
 
-        predictions = model(data_)
+        predictions = model.predict(data_)
         return predictions, data_
 
     def get_futur_prices(
@@ -224,7 +224,7 @@ class WindowGenerator():
             'Date': [ self.raw_stock['Date'].max() + relativedelta(days = i+1) for i in  range(OUT_STEPS)],
             'stock_price': [0]*steps_futur,
             'stock_stv': [0]*steps_futur,
-            'stock_logdif': list(predictions[0,:,index].numpy()) 
+            'stock_logdif': list(predictions[0,:,index]) 
         }
         prep_predictions = pd.DataFrame(prep_predictions)
         prep_predictions['stock_logdif'] = prep_predictions['stock_logdif'] * train_std[plot_col] + train_mean[plot_col]

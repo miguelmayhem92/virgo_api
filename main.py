@@ -53,7 +53,30 @@ def  get_vis(index: schemas.plot_schema,background_tasks: BackgroundTasks):
     headers = {'Content-Disposition': 'inline; filename="out.png"'}
     return Response(img_buf.getvalue(), headers=headers, media_type='image/png')
 
-@app.post("/predict")  
-def query_stock_2(stock_code: schemas.stock_code_production):
-    print('continue')
+@app.post("/predict_with_production_model")  
+def get_prodmodel(stock_code: schemas.stock_code_production):
+
+    run_predict_object = MLModel.get_model_production_results(stock_code.stock_code)
+    x = run_predict_object.get_model_predictions()
+    model_version = run_predict_object.model_version
+    result_from_training[str(stock_code.stock_code)] = run_predict_object
+    plots_availables = [
+        'return_prediction_plot','future_prices_plot'
+        ]
+    y = ' the available plots are: ' + str(plots_availables) + 'indexed'
+
+    return f'{x + y}'
+
+@app.post("/Inspect_train_prod_results")
+def  get_vis_prodmodel(index: schemas.plot_schema,background_tasks: BackgroundTasks):
+
+    results_to_post = {
+        '0': result_from_training[index.index_stock].return_prediction_plot(),
+        '1': result_from_training[index.index_stock].future_prices_plot(),
+    }
+
+    img_buf = results_to_post[index.plot_index]  
+    background_tasks.add_task(img_buf.close)
+    headers = {'Content-Disposition': 'inline; filename="out.png"'}
+    return Response(img_buf.getvalue(), headers=headers, media_type='image/png')
 
