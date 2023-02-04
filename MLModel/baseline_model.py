@@ -15,6 +15,8 @@ import matplotlib
 matplotlib.use('AGG')
 import matplotlib.pyplot as plt
 
+import time
+
 today_str = datetime.date.today().strftime("%Y-%m-%d")
 
 n_days = configs.data_configs.n_days
@@ -29,7 +31,6 @@ input_length = configs.data_configs.input_length
 best_error = configs.data_configs.best_error
 save_predictions_path = configs.data_configs.save_predictions_path
 save_model_path = configs.data_configs.save_model_path
-cross_validation_trials = configs.optimazation_configs.cross_validation_trials
 
 today_str = datetime.date.today().strftime("%Y-%m-%d")
 
@@ -212,9 +213,17 @@ class run_supermodel():
         if self.save_model:
 
             ### creation of experiment or skip if it exists
+            registered_model_name = f'{self.stock_code}_models'
+            tags = {"used_model": "tensorflow"}
+            desc = f"in this directory the models for {self.stock_code}"
+
+            experimet_name = f'{self.stock_code}_experiments'
+            run_name = f'{self.stock_code}-run-{today_str}'
+            artificat_path_run = f"{self.stock_code}-run"
+
             try:
                 experiment_id = mlflow.create_experiment(
-                    f'{self.stock_code}_experiments',
+                    experimet_name,
                     artifact_location=Path.cwd().joinpath("mlruns").as_uri(),
                 )
             except:
@@ -230,8 +239,8 @@ class run_supermodel():
                     exp_id = exp['experiment_id']
                     break
             ### metrics to store
-            mae_val = wide_window.get_metrics(self, self.model, source = 'validation')
-            mae_test = wide_window.get_metrics(self, self.model, source = 'test')
+            mae_val = wide_window.get_metrics( self.model, source = 'validation')
+            mae_test = wide_window.get_metrics( self.model, source = 'test')
 
             data_ = wide_window.total_data[-wide_window.input_width:]
             data_ = (data_  - train_mean) / train_std
@@ -240,30 +249,36 @@ class run_supermodel():
             signature = infer_signature(data_, best_model.predict(data_))
 
             with mlflow.start_run(
-                run_name = f'{self.stock_code}-run-{today_str}',
+                run_name = run_name,
                  experiment_id  = exp_id
                  ):
 
-                mlflow.log_param("mae", mae_val)
-                mlflow.log_param("mae", mae_test)
+                mlflow.log_param("mae_val", mae_val)
+                mlflow.log_param("mae_test", mae_test)
+                mlflow.log_param("train_mean", train_mean)
+                mlflow.log_param("train_std", train_std)
                 mlflow.tensorflow.log_model(
                     best_model, 
-                    artifact_path=f"{self.stock_code}-run",
+                    artifact_path= artificat_path_run,
                     signature = signature
                 )
-            mlflow.end_run()
+
             
             ### Model Register
             try:
                 client = MlflowClient()
-                client.create_registered_model(self.stock_code)
+                client.create_registered_model(registered_model_name,tags, desc)
             except:
                 print('folder already exists')
             
-            mlflow.tensorflow.log_model(best_model,
-                artifact_path=f"{self.stock_code}",
-                registered_model_name=f'{self.stock_code}_model',
-                signature=signature)
+            mlflow.tensorflow.log_model(
+                best_model,
+                artifact_path= f"{self.stock_code}",
+                registered_model_name = registered_model_name  ,
+                signature= signature
+                )
+            time.sleep(30)
+            print('waiting')
 
             ### staging the current model under the latest version
             versions = list()
@@ -271,14 +286,18 @@ class run_supermodel():
                 versions.append(dict(mv)['version'])
 
             client.transition_model_version_stage(
-                name=f'{self.stock_code}_model',
+                name=registered_model_name,
                 version=max(versions),
-                stage="Production")
+                stage="Production",
+                archive_existing_versions = True
+                )
             
             message_result = ' '.join([
                 message_result,
                 'best model results, metrics and model saved in mlflow '
             ])
+
+            mlflow.end_run()
 
         return (message_result)
 
@@ -299,6 +318,7 @@ class run_supermodel():
 
             ax.set_ylim(min(self.val_mae + self.test_mae)-0.05, max(self.val_mae + self.test_mae) + 0.05)
             _ = plt.legend()
+            plt.title(f'{self.stock_code}: error by baseline model')
 
             img_buf = io.BytesIO()
             plt.savefig(img_buf, format='png')
@@ -309,7 +329,7 @@ class run_supermodel():
         results = self.study.trials_dataframe()
 
         results['value'].sort_values().reset_index(drop=True).plot()
-        plt.title('Convergence plot')
+        plt.title(f'{self.stock_code}: Convergence plot')
         plt.xlabel('Iteration')
         plt.ylabel('Error')
 
@@ -338,6 +358,7 @@ class run_supermodel():
 
         plt.xlabel('Time [d]')
         plt.axhline(0.0, linestyle='--', color = 'pink')
+        plt.title(f'{self.stock_code}: return prediction plot')
 
         img_buf = io.BytesIO()
         plt.savefig(img_buf, format='png')
@@ -350,6 +371,7 @@ class run_supermodel():
         plt.plot(self.some_history.Date, self.some_history.stock_price, label='Inputs', marker='.', zorder=-10)
         plt.scatter(self.prep_predictions.Date, self.prep_predictions.stock_price,marker='X', edgecolors='k', label='Predictions',c='#ff7f0e', s=64)
         plt.xlabel('date')
+        plt.title(f'{self.stock_code}: price prediction plot')
 
         img_buf = io.BytesIO()
         plt.savefig(img_buf, format='png')

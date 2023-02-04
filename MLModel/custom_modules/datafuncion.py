@@ -265,7 +265,7 @@ class WindowGenerator():
         if source == 'validation':
             sample = self.val
 
-        error = model.evaluate(self.sample)[1]     
+        error = model.evaluate(sample)[1]     
         return error
     
     
