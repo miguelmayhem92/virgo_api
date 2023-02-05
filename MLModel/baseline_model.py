@@ -199,6 +199,7 @@ class run_supermodel():
             self.some_history = some_history
             self.prep_predictions = prep_predictions
             
+            self.best_model_framework = best_model_framework
             self.study = study
             self.model = best_model 
             final_result.to_csv(self.predictions_path_file)
@@ -216,6 +217,7 @@ class run_supermodel():
             registered_model_name = f'{self.stock_code}_models'
             tags = {"used_model": "tensorflow"}
             desc = f"in this directory the models for {self.stock_code}"
+            best_params = self.study.best_params
 
             experimet_name = f'{self.stock_code}_experiments'
             run_name = f'{self.stock_code}-run-{today_str}'
@@ -253,34 +255,25 @@ class run_supermodel():
                  experiment_id  = exp_id
                  ):
 
-                mlflow.log_param("mae_val", mae_val)
-                mlflow.log_param("mae_test", mae_test)
+                mlflow.log_param('best_model_framework', self.best_model_framework)
+                for paramx in best_params.keys():
+                    mlflow.log_param(paramx, best_params[paramx])
                 mlflow.log_param("train_mean", train_mean)
                 mlflow.log_param("train_std", train_std)
+
+                mlflow.log_metric("mae_val", mae_val)
+                mlflow.log_metric("mae_test", mae_test)
+
                 mlflow.tensorflow.log_model(
                     best_model, 
                     artifact_path= artificat_path_run,
+                    registered_model_name = registered_model_name ,
                     signature = signature
                 )
 
-            
-            ### Model Register
-            try:
-                client = MlflowClient()
-                client.create_registered_model(registered_model_name,tags, desc)
-            except:
-                print('folder already exists')
-            
-            mlflow.tensorflow.log_model(
-                best_model,
-                artifact_path= f"{self.stock_code}",
-                registered_model_name = registered_model_name  ,
-                signature= signature
-                )
+            ### staging the current model under the latest version
             time.sleep(30)
             print('waiting')
-
-            ### staging the current model under the latest version
             versions = list()
             for mv in client.search_model_versions(f'{self.stock_code}_model'):
                 versions.append(dict(mv)['version'])
