@@ -274,8 +274,9 @@ class run_supermodel():
             ### staging the current model under the latest version
             time.sleep(30)
             print('waiting')
+            filter_registered_model_name = "name='{}'".format(registered_model_name)
             versions = list()
-            for mv in client.search_model_versions(f'{self.stock_code}_model'):
+            for mv in client.search_model_versions(filter_registered_model_name):
                 versions.append(dict(mv)['version'])
 
             client.transition_model_version_stage(
