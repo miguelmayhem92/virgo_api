@@ -6,6 +6,10 @@ import tensorflow as tf
 import datetime
 from dateutil.relativedelta import relativedelta
 
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.compose import ColumnTransformer
+
 def get_stock_data(stock_code, n_days, window, lags):
     today = datetime.date.today()
     begin_date = today - relativedelta(days = n_days)
@@ -40,13 +44,26 @@ def get_stock_data(stock_code, n_days, window, lags):
     
     return df
 
-def shape_data(data, prefix, ref_price, std_column, logdif_column):
+"""def shape_data(data, prefix, ref_price, std_column, logdif_column):
     data = data[['Date', ref_price, std_column, logdif_column]]
     data = data.rename(columns = {
         ref_price: f'{prefix}_price',
         std_column: f'{prefix}_stv',
         logdif_column: f'{prefix}_logdif',
     })
+    return data"""
+
+def shape_data(data, prefix, ref_price, std_column, logdif_column):
+    data = data[['Date', ref_price, std_column, logdif_column, 'Volume','Close_roll_mean']]
+    data = data.rename(columns = {
+        ref_price: f'{prefix}_price',
+        std_column: f'{prefix}_stv',
+        logdif_column: f'{prefix}_logdif',
+        'Volume':f'{prefix}_Volume',
+        'Close_roll_mean':f'{prefix}_roll_mean'
+    })
+    data['Date'] = pd.to_datetime(data['Date'], format='%Y-%m-%d',utc=True)
+    data['Date'] = pd.to_datetime(data['Date']).dt.date
     return data
 
 ### function for data preparation
@@ -80,6 +97,18 @@ def data_eng_features(data, target = 'stock_logdif'):
     )
     
     return result
+
+def label_Bit_Ask(data, bids, asks):
+    data['Bid_Ask'] = np.nan
+    for bit_date in bids:
+        begin_date, end_date = bit_date
+        begin_date, end_date = datetime.datetime.strptime(begin_date, '%Y-%m-%d').date(), datetime.datetime.strptime(end_date, '%Y-%m-%d').date()
+        data['Bid_Ask'] = np.where((data.Date >= begin_date) & (data.Date <= end_date),'Bid', data['Bid_Ask'] )
+    for ask_date in asks:
+        begin_date, end_date = ask_date
+        begin_date, end_date = datetime.datetime.strptime(begin_date, '%Y-%m-%d').date(), datetime.datetime.strptime(end_date, '%Y-%m-%d').date()
+        data['Bid_Ask'] = np.where((data.Date >= begin_date) & (data.Date <= end_date),'Ask', data['Bid_Ask'] )
+    return data
 
 ### function for spliting the data frame
 class split_data():
@@ -267,5 +296,164 @@ class WindowGenerator():
 
         error = model.evaluate(sample)[1]     
         return error
+
+class slicer_date_prepa():
+    def __init__(self, data, code,dates_to_label, dates_back = 60 ):
     
+        self.df = data
+        self.dates_to_label = dates_to_label
+        self.code = code
+        self.dates_back = dates_back
+        
+        self.price = [ x for x in self.df.columns if '_price' in x ][0]
+        self.target = [ x for x in self.df.columns if '_logdif' in x ][0]
+        self.std_col = [ x for x in self.df.columns if '_stv' in x ][0]
+        self.volume_col = [ x for x in self.df.columns if '_Volume' in x ][0]
+        self.roll_mean_col = [ x for x in self.df.columns if '_roll_mean' in x ][0]
+
+    def feature_engineering(self):
+        df = (self.df
+            .assign(up_yield = np.where(self.df[self.target] > 0, 1,0))
+            .assign(low_yield = np.where(self.df[self.target] <= 0, 1,0))
+        )
+        
+        df = df.rename(columns = {self.price:'price'})
+        df["roll_up_yield"] = df.sort_values('Date')["up_yield"].transform(lambda x: x.rolling(10, min_periods=1).sum())
+        df["roll_low_yield"] = df.sort_index()["low_yield"].transform(lambda x: x.rolling(10, min_periods=1).sum())
+        df["roll_std"] = df.sort_index()[self.std_col].transform(lambda x: x.rolling(10, min_periods=1).mean())
+        df['log_Volume'] = np.log(df[self.volume_col])
+        df["roll_log_Volume"] = df.sort_index()['log_Volume'].transform(lambda x: x.rolling(5, min_periods=1).mean())
+        df['Bid_target'] = np.where(df['Bid_Ask'] == 'Bid', 1, 0)
+        
+        
+        self.df = df
     
+    def get_slice(self):
+        
+        tuples_dates_bid = self.dates_to_label[code]['bids']
+        first_bid_date = [tuplex[1] for tuplex in tuples_dates_bid]
+
+        dates_flagg = list()
+        index_flow = list()
+        for i,datex in enumerate(first_bid_date):
+            for j in range(self.dates_back):
+                date = (datetime.datetime.strptime(datex, '%Y-%m-%d') - relativedelta(days = j)).date()
+                dates_flagg.append(date)
+                index_flow.append(i)
+
+        indexed_flow = dict(zip(dates_flagg,index_flow))
+        self.df['indexed_flow_id'] = self.df.Date.map(indexed_flow)
+        indexes = list(self.df.indexed_flow_id.unique())
+        self.total_indexes = [int(x) for x in indexes if np.isnan(x) == False]
+        
+    def slice_treated(self, slicex):
+        
+        ds = self.df[self.df.indexed_flow_id == slicex]
+        ds = ds.rename(columns = {self.price:'price'})
+        
+        ds_max = ds[ds[self.roll_mean_col] == ds[self.roll_mean_col].max()].head(1).Date.values[0]
+        ds_min = ds[ds[self.roll_mean_col] == ds[self.roll_mean_col].min()].head(1).Date.values[0]
+        ds['time_to_max'] = pd.to_numeric((self.df.Date - ds_max).dt.days,downcast='float')
+        ds['time_to_min'] = pd.to_numeric((self.df.Date - ds_min).dt.days,downcast='float')
+        
+
+        ### apply pipeline sklearn
+        my_features = ['roll_up_yield','roll_low_yield','roll_std','log_Volume','roll_log_Volume','time_to_max','time_to_min']
+        exeptions = ['Date', 'price']
+        scale_features = ['roll_std','log_Volume',	'roll_log_Volume']
+        my_target = 'Bid_target'
+
+        X_train = ds[my_features + exeptions]
+        y_train = ds[my_target]
+
+        pipeline = Pipeline([
+            ('scaler', ColumnTransformer([('scaling', StandardScaler(), scale_features)], remainder='passthrough'))
+        ])
+
+        pipeline.fit(X_train, y_train)
+        self.my_features = my_features
+        self.exeptions = exeptions
+        self.scale_features = scale_features
+        self.pipeline = pipeline
+        self.ds = ds
+        
+        self.X_train_transformed = pipeline.transform(X_train)
+        self.y_train = y_train
+    
+class slice_predict():
+    def __init__(self, data, code, features, exeptions, scale_features, dates_back = 60 ):
+    
+        self.df = data
+        self.code = code
+        self.my_features = features
+        self.exeptions = exeptions
+        self.scale_features = scale_features
+        self.dates_back = dates_back
+        
+        self.price = [ x for x in self.df.columns if '_price' in x ][0]
+        self.target = [ x for x in self.df.columns if '_logdif' in x ][0]
+        self.std_col = [ x for x in self.df.columns if '_stv' in x ][0]
+        self.volume_col = [ x for x in self.df.columns if '_Volume' in x ][0]
+        self.roll_mean_col = [ x for x in self.df.columns if '_roll_mean' in x ][0]
+
+    def feature_engineering(self):
+        df = (self.df
+            .assign(up_yield = np.where(self.df[self.target] > 0, 1,0))
+            .assign(low_yield = np.where(self.df[self.target] <= 0, 1,0))
+        )
+        
+        df = df.rename(columns = {self.price:'price'})
+        df["roll_up_yield"] = df.sort_values('Date')["up_yield"].transform(lambda x: x.rolling(10, min_periods=1).sum())
+        df["roll_low_yield"] = df.sort_index()["low_yield"].transform(lambda x: x.rolling(10, min_periods=1).sum())
+        df["roll_std"] = df.sort_index()[self.std_col].transform(lambda x: x.rolling(10, min_periods=1).mean())
+        df['log_Volume'] = np.log(df[self.volume_col])
+        df["roll_log_Volume"] = df.sort_index()['log_Volume'].transform(lambda x: x.rolling(5, min_periods=1).mean())
+        
+        self.df = df
+    def get_slice(self):
+        
+        begin_date = datetime.date.today()- relativedelta(days = self.dates_back)
+        ds = self.df[self.df.Date >= begin_date]
+        ds = ds.rename(columns = {self.price:'price'})
+        
+        ds_max = ds[ds[self.roll_mean_col] == ds[self.roll_mean_col].max()].head(1).Date.values[0]
+        ds_min = ds[ds[self.roll_mean_col] == ds[self.roll_mean_col].min()].head(1).Date.values[0]
+        ds['time_to_max'] = pd.to_numeric((self.df.Date - ds_max).dt.days,downcast='float')
+        ds['time_to_min'] = pd.to_numeric((self.df.Date - ds_min).dt.days,downcast='float')
+        
+        ### apply pipeline sklearn
+
+        X_train = ds[self.my_features + self.exeptions]
+
+        pipeline = Pipeline([
+            ('scaler', ColumnTransformer([('scaling', StandardScaler(), self.scale_features)], remainder='passthrough'))
+        ])
+
+        pipeline.fit(X_train)
+        self.pipeline = pipeline
+        self.ds = ds
+        
+        self.X_train_transformed = pipeline.transform(X_train)
+
+class evaluate():
+    def __init__(self, model, data,X_test, y_test):
+        
+        evaluate.model = model
+        evaluate.data = data
+        evaluate.stocks = data.code.unique()
+        evaluate.X_test = X_test
+        evaluate.y_test = y_test
+        
+    def get_error(self):
+        self.y_pred = self.model.predict(self.X_test)
+
+        self.precision = precision_score(self.y_test, self.y_pred)
+        self.weighted_precision = precision_score(self.y_test, self.y_pred, average='weighted')
+        self.roc_auc = roc_auc_score(self.y_test, self.y_pred)
+        self.data['prediction'] = self.y_pred
+        return print('\n'.join([
+            f'Test results:',
+            f'the precision is {self.precision}',
+            f'the weighted precision is {self.weighted_precision}',
+            f'the ROC-AUC is {self.roc_auc}'
+        ]))

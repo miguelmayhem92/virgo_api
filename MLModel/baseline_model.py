@@ -26,6 +26,7 @@ ref_price = configs.data_configs.ref_price
 std_column = configs.data_configs.std_column
 logdif_column = configs.data_configs.logdif_column
 split_config = configs.data_configs.split_config
+drop_columns = configs.data_configs.drop_columns
 OUT_STEPS = configs.data_configs.steps_to_predic
 input_length = configs.data_configs.input_length
 best_error = configs.data_configs.best_error
@@ -60,7 +61,9 @@ class run_supermodel():
         ### getting the data
         raw_stock = datafuncion.get_stock_data(stock_code = self.stock_code, n_days = n_days, window = window, lags = lag_days)
         raw_stock = datafuncion.shape_data(raw_stock , 'stock', ref_price, std_column, logdif_column)
-
+        features = [column for column in raw_stock.columns if column not in drop_columns]
+        raw_stock = raw_stock[features]
+        
         ### feature engineering
         stock_data = datafuncion.data_eng_features(data = raw_stock)
         
