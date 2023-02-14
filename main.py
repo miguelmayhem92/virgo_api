@@ -80,3 +80,20 @@ def  get_vis_prodmodel(index: schemas.plot_schema,background_tasks: BackgroundTa
     headers = {'Content-Disposition': 'inline; filename="out.png"'}
     return Response(img_buf.getvalue(), headers=headers, media_type='image/png')
 
+### bidfinder model
+
+@app.post("/train_bid_finder")
+def  get_bid_finder_model(index: schemas.train_bidfinder):
+
+
+
+    results_to_post = {
+        '0': result_from_training[index.index_stock].return_prediction_plot(),
+        '1': result_from_training[index.index_stock].future_prices_plot(),
+    }
+
+    img_buf = results_to_post[index.plot_index]  
+    background_tasks.add_task(img_buf.close)
+    headers = {'Content-Disposition': 'inline; filename="out.png"'}
+    return Response(img_buf.getvalue(), headers=headers, media_type='image/png')
+

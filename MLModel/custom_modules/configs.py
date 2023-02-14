@@ -70,3 +70,7 @@ class low_finder_configs:
     }
     d_types = {'roll_up_yield':'float','roll_low_yield':'float','roll_std':'float',
                'log_Volume': 'float', 'roll_log_Volume': 'float', 'time_to_max': 'float', 'time_to_min': 'float'}
+
+    features = ['roll_up_yield', 'roll_low_yield', 'roll_std', 'log_Volume', 'roll_log_Volume', 'time_to_max', 'time_to_min']
+    exeptions = ['Date', 'price']
+    scale_features = ['roll_std', 'log_Volume', 'roll_log_Volume']

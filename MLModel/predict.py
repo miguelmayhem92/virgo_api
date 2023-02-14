@@ -2,7 +2,7 @@ import mlflow.pyfunc
 from mlflow import MlflowClient
 from .custom_modules import  datafuncion,configs
 import datetime
-
+import pandas as pd
 import io
 import matplotlib
 matplotlib.use('AGG')
@@ -17,11 +17,16 @@ ref_price = configs.data_configs.ref_price
 std_column = configs.data_configs.std_column
 logdif_column = configs.data_configs.logdif_column
 split_config = configs.data_configs.split_config
+drop_columns = configs.data_configs.drop_columns
 OUT_STEPS = configs.data_configs.steps_to_predic
 input_length = configs.data_configs.input_length
 best_error = configs.data_configs.best_error
 save_predictions_path = configs.data_configs.save_predictions_path
 save_model_path = configs.data_configs.save_model_path
+
+features = configs.low_finder_configs.features
+exeptions = configs.low_finder_configs.exeptions
+scale_features = configs.low_finder_configs.scale_features
 
 
 class get_model_production_results():
@@ -52,7 +57,8 @@ class get_model_production_results():
             ### getting the data
             raw_stock = datafuncion.get_stock_data(stock_code = self.stock_code, n_days = n_days, window = window, lags = lag_days)
             raw_stock = datafuncion.shape_data(raw_stock , 'stock', ref_price, std_column, logdif_column)
-
+            features = [column for column in raw_stock.columns if column not in drop_columns]
+            raw_stock = raw_stock[features]
             ### feature engineering
             stock_data = datafuncion.data_eng_features(data = raw_stock)
             
@@ -157,3 +163,18 @@ class get_model_production_results():
         plt.savefig(img_buf, format='png')
         plt.close()
         return img_buf
+
+class predict_bid_finder():
+    def __init__(self, code):
+
+        self.code = code
+    
+    def predict(self):
+        data_stock = datafuncion.data_functions.get_stock_data(stock_code = self.code, n_days = n_days, window = window, lags = lag_days)
+        data_stock_ = datafuncion.shape_data(data_stock, self.code, ref_price, std_column, logdif_column)
+
+        data_to_predict = datafuncion.slice_predict( data_stock_, self.code, features, exeptions, scale_features)
+        data_to_predict.feature_engineering()
+        data_to_predict.get_slice()
+        dataset_to_predict = pd.DataFrame(data_to_predict.X_train_transformed, columns = features + exeptions)
+        X_predict = dataset_to_predict[features]
