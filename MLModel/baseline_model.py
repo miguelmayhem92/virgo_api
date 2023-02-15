@@ -257,12 +257,13 @@ class run_supermodel():
                 run_name = run_name,
                  experiment_id  = exp_id
                  ):
-
+                
                 mlflow.log_param('best_model_framework', self.best_model_framework)
                 for paramx in best_params.keys():
                     mlflow.log_param(paramx, best_params[paramx])
-                mlflow.log_param("train_mean", train_mean)
-                mlflow.log_param("train_std", train_std)
+
+                #mlflow.log_param("train_mean", train_mean)
+                #mlflow.log_param("train_std", train_std)
 
                 mlflow.log_metric("mae_val", mae_val)
                 mlflow.log_metric("mae_test", mae_test)

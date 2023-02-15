@@ -14,15 +14,25 @@ import pickle
 import os
 import pandas as pd
 import numpy as np
+import datetime
 
 import mlflow
 from pathlib import Path
 from  mlflow.tracking import MlflowClient
 from mlflow.models.signature import infer_signature
 
+import seaborn as sns; sns.set()
+import io
+import matplotlib
+import matplotlib.gridspec as gridspec
+matplotlib.use('AGG')
+import matplotlib.pyplot as plt
+
+import time
 
 from .custom_modules import configs, datafuncion, crossvalidation_low_finder
 
+today_str = datetime.date.today().strftime("%Y-%m-%d")
 
 n_days = configs.data_configs.n_days
 lag_days = configs.data_configs.lags
@@ -35,7 +45,7 @@ n_trials = configs.low_finder_configs.n_trials
 d_types = configs.low_finder_configs.d_types ## for xgboost
 
 datasets = dict()
-class train_bidfider(train = False):
+class train_bidfinder():
     def __init__(self, train_new_model = False):
         self.train_new_model =train_new_model
 
@@ -86,7 +96,7 @@ class train_bidfider(train = False):
             code_list_train = list()
             code_list_test = list()
             for code in dates_to_label.keys():
-                
+            
                 X_train_array, y_train_array = datasets[code]['X_train'], datasets[code]['y_train']
                 X_test_array, y_test_array = datasets[code]['X_test'], datasets[code]['y_test']
                 
@@ -96,7 +106,7 @@ class train_bidfider(train = False):
                 y_test.append(y_test_array)
                 code_list_train.append(list([code]*X_train_array.shape[0]))
                 code_list_test.append(list([code]*X_test_array.shape[0]))
-                
+            
             X_train = np.concatenate(X_train, axis=0)
             y_train = np.concatenate(y_train, axis=0)
             X_test = np.concatenate(X_test, axis=0)
@@ -115,69 +125,75 @@ class train_bidfider(train = False):
             X_test, y_test = dataset_test[object_test.my_features], dataset_test['target']
 
             ### Training models using crossvalidation
-            study = optuna.create_study(
+            study_rf = optuna.create_study(
                 direction="maximize",
                 sampler=optuna.samplers.TPESampler(),
             )
 
             func_objective = lambda trial: crossvalidation_low_finder.objective_rf(trial, X_train, y_train)
             optuna.logging.set_verbosity(0)
-            study.optimize(func_objective, n_trials=n_trials)
+            study_rf.optimize(func_objective, n_trials=n_trials)
 
-            rf_model = BaggingClassifier(RandomForestClassifier(**study.best_params), n_estimators=5, bootstrap = False, n_jobs = -1).fit(X_train, y_train)
+            rf_model = BaggingClassifier(RandomForestClassifier(**study_rf.best_params), n_estimators=5, bootstrap = False, n_jobs = -1).fit(X_train, y_train)
 
             random_forest_evaluate = datafuncion.evaluate(rf_model, dataset_test, X_test, y_test)
             random_forest_evaluate.get_error()
 
 
-            study = optuna.create_study(
+            study_adb = optuna.create_study(
                 direction="maximize",
                 sampler=optuna.samplers.TPESampler(),
             )
 
             func_objective = lambda trial: crossvalidation_low_finder.objective_adb(trial, X_train, y_train)
             optuna.logging.set_verbosity(0)
-            study.optimize(func_objective, n_trials=n_trials)
+            study_adb.optimize(func_objective, n_trials=n_trials)
 
-            abc_model = BaggingClassifier(AdaBoostClassifier(**study.best_params), n_estimators=5, bootstrap = False, n_jobs = -1).fit(X_train, y_train)
+            abc_model = BaggingClassifier(AdaBoostClassifier(**study_adb.best_params), n_estimators=5, bootstrap = False, n_jobs = -1).fit(X_train, y_train)
 
             adaboost_evaluate = datafuncion.evaluate(abc_model, dataset_test, X_test, y_test)
             adaboost_evaluate.get_error()
 
-
-
             X_train = X_train.astype(d_types)
             X_test = X_test.astype(d_types)
 
-            study = optuna.create_study(
+            study_xgb = optuna.create_study(
                 direction="maximize",
                 sampler=optuna.samplers.TPESampler(),
             )
 
-            func_objective = lambda trial: crossvalidation_low_finder.objective_xgb(trial)
+            func_objective = lambda trial: crossvalidation_low_finder.objective_xgb(trial, X_train, y_train)
             optuna.logging.set_verbosity(0)
-            study.optimize(func_objective, n_trials=n_trials)
+            study_xgb.optimize(func_objective, n_trials=n_trials)
 
-            xgb_model = XGBClassifier(**study.best_params).fit(X_train, y_train)
+            xgb_model = XGBClassifier(**study_xgb.best_params).fit(X_train, y_train)
 
             xgb_evaluate = datafuncion.evaluate(xgb_model, dataset_test, X_test, y_test)
             xgb_evaluate.get_error()
 
             ### summary
+
+
             metrics_json = {'Random_forest' : {
                 'Precision':random_forest_evaluate.precision, 
                 'Weighted Precision':random_forest_evaluate.weighted_precision, 
                 'ROC AUC':random_forest_evaluate.roc_auc,
+                'study':study_rf,
+                'model':rf_model,
                 },
             'AdaBoost' : {
                 'Precision':adaboost_evaluate.precision, 
                 'Weighted Precision':adaboost_evaluate.weighted_precision, 
                 'ROC AUC':adaboost_evaluate.roc_auc,
+                'study':study_adb,
+                'model': abc_model,
                 },
             'XGBoost' : {
                 'Precision':xgb_evaluate.precision, 
                 'Weighted Precision':xgb_evaluate.weighted_precision, 
                 'ROC AUC':xgb_evaluate.roc_auc,
+                'study': study_xgb,
+                'model': xgb_model,
                 }
             }
 
@@ -185,27 +201,39 @@ class train_bidfider(train = False):
             models = list()
             metrics = list()
             values = list()
+            metric_list = ['Precision', 'Weighted Precision', 'ROC AUC']
             for key in metrics_json.keys():
-                for metric in metrics_json[key].keys():
+                for metric in metric_list:
                     value = metrics_json[key][metric]
-                    models.append(key)
-                    metrics.append(metric)
-                    values.append(value)
+                    models.append(str(key))
+                    metrics.append(str(metric))
+                    values.append(float(value))
             data['models'] = models
             data['metrics'] = metrics
             data['values'] = values
+            
             summary = pd.DataFrame(data)
+            self.metrics_json = metrics_json
 
-            ## Saving model in MLflow
+            best_model_framework = summary[summary.metrics == 'ROC AUC'].sort_values('values',ascending = False).head(1).models.values[0]
+            best_model = metrics_json[best_model_framework]['model']
+            best_study = metrics_json[best_model_framework]['study']
+
+            self.summary = summary
+            self.best_model_framework = best_model_framework
+
+
+            ## Saving best model in MLflow
             ### creation of experiment or skip if it exists
-            registered_model_name = f'{self.stock_code}_models'
-            tags = {"used_model": "tensorflow"}
-            desc = f"in this directory the models for {self.stock_code}"
-            best_params = self.study.best_params
+            name_model = 'bid_finder'
+            registered_model_name = f'{name_model}_models'
+            tags = {"used_model": "Random forest, Adaboost and XgBoost"}
+            desc = f"in this directory the models for bid finder"
+            best_params = best_study.best_params
 
-            experimet_name = f'{self.stock_code}_experiments'
-            run_name = f'{self.stock_code}-run-{today_str}'
-            artificat_path_run = f"{self.stock_code}-run"
+            experimet_name = f'{name_model}_experiments'
+            run_name = f'{name_model}-run-{today_str}'
+            artificat_path_run = f"{name_model}-run"
 
             try:
                 experiment_id = mlflow.create_experiment(
@@ -221,18 +249,14 @@ class train_bidfider(train = False):
 
             for exp in experiments:
                 exp = dict(exp)
-                if exp['name'] == f'{self.stock_code}_experiments':
+                if exp['name'] == f'{name_model}_experiments':
                     exp_id = exp['experiment_id']
                     break
             ### metrics to store
-            mae_val = wide_window.get_metrics( self.model, source = 'validation')
-            mae_test = wide_window.get_metrics( self.model, source = 'test')
-
-            data_ = wide_window.total_data[-wide_window.input_width:]
-            data_ = (data_  - train_mean) / train_std
-            data_ = data_.values
-            data_ = data_.reshape((1,data_.shape[0],data_.shape[1]))
-            signature = infer_signature(data_, best_model.predict(data_))
+            precision = metrics_json[self.best_model_framework]['Precision']
+            weighted_precision = metrics_json[self.best_model_framework]['Weighted Precision']
+            roc_auc = metrics_json[self.best_model_framework]['ROC AUC']
+            signature = infer_signature(X_test, best_model.predict(X_test))
 
             with mlflow.start_run(
                 run_name = run_name,
@@ -242,18 +266,25 @@ class train_bidfider(train = False):
                 mlflow.log_param('best_model_framework', self.best_model_framework)
                 for paramx in best_params.keys():
                     mlflow.log_param(paramx, best_params[paramx])
-                mlflow.log_param("train_mean", train_mean)
-                mlflow.log_param("train_std", train_std)
+                
+                mlflow.log_metric("precision", precision)
+                mlflow.log_metric("weighted_precision", weighted_precision)
+                mlflow.log_metric("roc_auc", roc_auc)
 
-                mlflow.log_metric("mae_val", mae_val)
-                mlflow.log_metric("mae_test", mae_test)
-
-                mlflow.tensorflow.log_model(
-                    best_model, 
-                    artifact_path= artificat_path_run,
-                    registered_model_name = registered_model_name ,
-                    signature = signature
-                )
+                if self.best_model_framework != 'XGBoost':
+                    mlflow.sklearn.log_model(
+                        best_model, 
+                        artifact_path= artificat_path_run,
+                        registered_model_name = registered_model_name ,
+                        signature = signature
+                    )
+                else :
+                    mlflow.xgboost.log_model(
+                        best_model, 
+                        artifact_path= artificat_path_run,
+                        registered_model_name = registered_model_name ,
+                        signature = signature
+                    )
 
             ### staging the current model under the latest version
             time.sleep(30)
@@ -271,11 +302,22 @@ class train_bidfider(train = False):
                 )
 
             message_result = ' '.join([
-                message_result,
                 'best model results, metrics and model saved in mlflow '
             ])
 
             mlflow.end_run()
+            return message_result
 
-            return (message_result)
         
+        else:
+            return 'nothing happend'
+
+    def plot_model_training_results(self):
+
+        summary = self.summary
+        sns.barplot(data= summary, x="metrics", y="values", hue="models")
+
+        img_buf = io.BytesIO()
+        plt.savefig(img_buf, format='png')
+        plt.close()
+        return img_buf

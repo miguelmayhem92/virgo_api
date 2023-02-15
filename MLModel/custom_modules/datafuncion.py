@@ -10,6 +10,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.compose import ColumnTransformer
 
+from sklearn.metrics import precision_score, roc_auc_score
+
 def get_stock_data(stock_code, n_days, window, lags):
     today = datetime.date.today()
     begin_date = today - relativedelta(days = n_days)
@@ -330,7 +332,7 @@ class slicer_date_prepa():
     
     def get_slice(self):
         
-        tuples_dates_bid = self.dates_to_label[code]['bids']
+        tuples_dates_bid = self.dates_to_label[self.code]['bids']
         first_bid_date = [tuplex[1] for tuplex in tuples_dates_bid]
 
         dates_flagg = list()

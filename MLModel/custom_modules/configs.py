@@ -25,6 +25,7 @@ class optimazation_configs:
 
 class low_finder_configs:
     n_trials = 10
+    save_path = f'{root}/predictions_bids'
     dates_to_label = {
         "BP":{
             'bids': [('2021-08-19','2021-09-14'), ('2021-12-15','2021-12-30'),('2022-07-11','2022-07-18'), ('2022-10-07','2022-10-19')],

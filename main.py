@@ -83,17 +83,32 @@ def  get_vis_prodmodel(index: schemas.plot_schema,background_tasks: BackgroundTa
 ### bidfinder model
 
 @app.post("/train_bid_finder")
-def  get_bid_finder_model(index: schemas.train_bidfinder):
+def  get_bid_finder_model(order: schemas.train_bidfinder):
 
+    bid_finder_object = MLModel.train_bidfinder(order.train_bidfinder)
+    message = bid_finder_object.train_new_bidfinder()
+    result_from_training['bid_finder'] = bid_finder_object
 
+    return {message}
+
+@app.post("/Inspect_train_finder_train_results")
+def  get_vis_bid_finder_train_results(background_tasks: BackgroundTasks):
 
     results_to_post = {
-        '0': result_from_training[index.index_stock].return_prediction_plot(),
-        '1': result_from_training[index.index_stock].future_prices_plot(),
+        '0': result_from_training['bid_finder'].plot_model_training_results(),
     }
 
-    img_buf = results_to_post[index.plot_index]  
+    img_buf = results_to_post['0']  
     background_tasks.add_task(img_buf.close)
     headers = {'Content-Disposition': 'inline; filename="out.png"'}
     return Response(img_buf.getvalue(), headers=headers, media_type='image/png')
+
+@app.post("/predict_bid_finder")
+def  predict_bid_finder_model(order: schemas.predict_bidfinder):
+
+    predict_object = MLModel.predict_bid_finder(order.predict_bidfinder)
+    predict_object.callmodel()
+    message = predict_object.get_prediction()
+
+    return {message}
 

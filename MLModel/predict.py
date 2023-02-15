@@ -28,6 +28,7 @@ features = configs.low_finder_configs.features
 exeptions = configs.low_finder_configs.exeptions
 scale_features = configs.low_finder_configs.scale_features
 
+save_bid_predictions_path = configs.low_finder_configs.save_path
 
 class get_model_production_results():
 
@@ -165,16 +166,59 @@ class get_model_production_results():
         return img_buf
 
 class predict_bid_finder():
-    def __init__(self, code):
+    def __init__(self, codes):
 
-        self.code = code
+        self.codes = codes
+        self.predictions_path_file = f'{save_bid_predictions_path}/{today_str}-bids-predictions.csv'
+
+    def callmodel(self):
+
+        client = MlflowClient()
+
+        model_name = f'bid_finder_models'
+        latest_version_info = client.get_latest_versions(model_name, stages=["Production"])
+        latest_production_version = latest_version_info[0].version
+        model_version = latest_production_version
+        self.model_version = model_version
+
+        model = mlflow.pyfunc.load_model(
+            model_uri=f"models:/{model_name}/{model_version}"
+        )
+
+        self.model = model 
     
-    def predict(self):
-        data_stock = datafuncion.data_functions.get_stock_data(stock_code = self.code, n_days = n_days, window = window, lags = lag_days)
-        data_stock_ = datafuncion.shape_data(data_stock, self.code, ref_price, std_column, logdif_column)
+    def get_prediction(self):
 
-        data_to_predict = datafuncion.slice_predict( data_stock_, self.code, features, exeptions, scale_features)
-        data_to_predict.feature_engineering()
-        data_to_predict.get_slice()
-        dataset_to_predict = pd.DataFrame(data_to_predict.X_train_transformed, columns = features + exeptions)
-        X_predict = dataset_to_predict[features]
+        class predict():
+            def __init__(self, model, data,X_test):
+                
+                self.model = model
+                self.data = data
+                self.X_test = X_test
+                self.y_pred = self.model.predict(self.X_test)
+                self.data['prediction'] = self.y_pred
+
+        results = list()
+
+        for code in self.codes:
+
+            data_stock = datafuncion.get_stock_data(stock_code = code, n_days = n_days, window = window, lags = lag_days)
+            data_stock_ = datafuncion.shape_data(data_stock, code, ref_price, std_column, logdif_column)
+
+            data_to_predict = datafuncion.slice_predict( data_stock_, code, features, exeptions, scale_features)
+            data_to_predict.feature_engineering()
+            data_to_predict.get_slice()
+            dataset_to_predict = pd.DataFrame(data_to_predict.X_train_transformed, columns = features + exeptions)
+            X_predict = dataset_to_predict[features]
+            predictions = predict(self.model, dataset_to_predict, X_predict)
+
+            result = predictions.data
+            result['stock'] = code
+            result = result[result.prediction == 1][['Date','prediction','stock']]
+
+            results.append(result)
+
+        results = pd.concat(results)
+        results.to_csv(self.predictions_path_file)
+
+        return 'predictions are saved'
