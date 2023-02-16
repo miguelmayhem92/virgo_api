@@ -58,7 +58,8 @@ class get_model_production_results():
             ### getting the data
             raw_stock = datafuncion.get_stock_data(stock_code = self.stock_code, n_days = n_days, window = window, lags = lag_days)
             raw_stock = datafuncion.shape_data(raw_stock , 'stock', ref_price, std_column, logdif_column)
-            features = [column for column in raw_stock.columns if column not in drop_columns]
+            
+            features = [column for column in raw_stock.columns if column.replace('stock','') not in drop_columns]
             raw_stock = raw_stock[features]
             ### feature engineering
             stock_data = datafuncion.data_eng_features(data = raw_stock)
